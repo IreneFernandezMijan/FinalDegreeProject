@@ -1,41 +1,52 @@
-pip install pandas scikit-learn tensorflow keras rdkit matplotlib seaborn
-
+# Import core libraries for data manipulation, machine learning, visualization, and cheminformatics
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+# RDKit for molecule handling, descriptor calculation, and fingerprinting
 from rdkit import Chem, DataStructs
 from rdkit.Chem import Descriptors, Crippen, Lipinski, rdMolDescriptors
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem import AllChem
+from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
+
+# Scikit-learn for preprocessing, model evaluation, and cross-validation
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn.metrics import (accuracy_score, precision_score, recall_score,
                              f1_score, roc_auc_score, roc_curve,
                              mean_squared_error, r2_score)
+
+# TensorFlow/Keras for deep learning model creation and training
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, Input
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
-from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
+from tensorflow.keras.regularizers import l2
+
+# Others
 import os
 import random
 import tensorflow as tf
-from tensorflow.keras.regularizers import l2
 import joblib
 
+# Set random seed for reproducibility across NumPy, TensorFlow, and Python
 def set_seed(seed=42):
     os.environ['PYTHONHASHSEED'] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
     tf.random.set_seed(seed)
-    os.environ['TF_DETERMINISTIC_OPS'] = '1'  # Opcional, solo en CPU/GPU compatibles
+    os.environ['TF_DETERMINISTIC_OPS'] = '1'  # Enables deterministic operations when supported
 
+# Configuration for Morgan fingerprinting
 FP_SIZE = 2048
 RADIUS = 2
 RANDOM_STATE = 42
 morgan_generator = GetMorganGenerator(radius=RADIUS, fpSize=FP_SIZE)
 
+
+# Canonicalize SMILES (standardized string representation of molecules)
 def standardize_smiles(smiles):
     try:
         mol = Chem.MolFromSmiles(smiles)
@@ -45,6 +56,7 @@ def standardize_smiles(smiles):
     except:
         return None
 
+# Convert SMILES to a Morgan fingerprint (binary vector representing molecular substructure)
 def smiles_to_fingerprint(smiles):
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -54,6 +66,7 @@ def smiles_to_fingerprint(smiles):
     DataStructs.ConvertToNumpyArray(fp, arr)
     return arr
 
+# Extract 8 physical-chemical descriptors per molecule
 def extract_physchem_features(smiles):
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -67,27 +80,33 @@ def extract_physchem_features(smiles):
         Lipinski.NumHDonors(mol),
         Lipinski.NumHAcceptors(mol),
         rdMolDescriptors.CalcNumAromaticRings(mol),
-        0.0  # Placeholder
+        0.0  # Reserved for custom or future features
     ])
 
+# Combine fingerprints and descriptors into a single feature matrix and prepare target values
 def prepare_dataset(df, task):
     df = df.dropna(subset=["SMILES"]).reset_index(drop=True)
     df["SMILES"] = df["SMILES"].apply(standardize_smiles)
     df = df.dropna(subset=["SMILES"]).reset_index(drop=True)
 
+    # Feature extraction
     fps = np.array([smiles_to_fingerprint(s) for s in df["SMILES"]])
     desc_raw = np.array([extract_physchem_features(s) for s in df["SMILES"]])
 
-    # This is where the StandardScaler is created and fitted
+    # Standardize descriptors
     scaler = StandardScaler()
     desc_scaled = scaler.fit_transform(desc_raw)
 
+    # Combine features
     X = np.concatenate([fps, desc_scaled], axis=1)
+
+    # Define target variable
     y = df["BBB+/BBB-"].map({"BBB+": 1, "BBB-": 0}).to_numpy() if task == "classification" else df["logBB"].to_numpy()
 
-    # *** CRITICAL CHANGE: Return the scaler as the third value ***
-    return X, y, scaler
+    return X, y, scaler  # Return features, targets, and fitted scaler
 
+
+# Define a dense feedforward neural network with dropout and L2 regularization
 def build_model(input_dim, task):
     model = Sequential([
         Input(shape=(input_dim,)),
@@ -104,6 +123,7 @@ def build_model(input_dim, task):
     )
     return model
 
+# Perform 5-fold cross-validation and evaluate the model using metrics appropriate to the task
 def evaluate_model(X, y, task):
     folds = StratifiedKFold(5, shuffle=True, random_state=RANDOM_STATE) if task == "classification" else KFold(5, shuffle=True, random_state=RANDOM_STATE)
     metrics = []
@@ -124,9 +144,9 @@ def evaluate_model(X, y, task):
             verbose=0
         )
         histories.append(history)
-
         y_pred = model.predict(X[val_idx]).flatten()
 
+        # Evaluate performance
         if task == "classification":
             y_bin = (y_pred > 0.5).astype(int)
             metrics.append({
@@ -137,13 +157,14 @@ def evaluate_model(X, y, task):
                 "roc_auc": roc_auc_score(y[val_idx], y_pred)
             })
 
+            # Plot ROC curve
             fpr, tpr, _ = roc_curve(y[val_idx], y_pred)
             plt.figure(figsize=(6, 5))
             plt.plot(fpr, tpr, label=f'ROC Fold {fold_idx + 1}')
             plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
             plt.xlabel("FPR")
             plt.ylabel("TPR")
-            plt.title(f"Curva ROC - Fold {fold_idx + 1}")
+            plt.title(f"ROC Curve - Fold {fold_idx + 1}")
             plt.legend()
             plt.grid(True)
             plt.tight_layout()
@@ -155,50 +176,52 @@ def evaluate_model(X, y, task):
                 "r2": r2_score(y[val_idx], y_pred)
             })
 
+            # Scatter plot of predictions vs true values
             plt.figure(figsize=(6, 5))
             plt.scatter(y[val_idx], y_pred, alpha=0.6)
-            plt.xlabel("Real")
-            plt.ylabel("Predicho")
-            plt.title(f"Regresión: valores reales vs predichos - Fold {fold_idx + 1}")
+            plt.xlabel("True")
+            plt.ylabel("Predicted")
+            plt.title(f"Regression: True vs Predicted - Fold {fold_idx + 1}")
             plt.grid(True)
             plt.tight_layout()
             plt.show()
 
-    if task == 'classification':
-        # Curva de pérdida y exactitud generales
+
+        if task == 'classification':
+        # Plot training and validation loss and accuracy
         plt.figure(figsize=(14, 5))
 
         plt.subplot(1, 2, 1)
         for h in histories:
             plt.plot(h.history['loss'], color='blue', alpha=0.3)
             plt.plot(h.history['val_loss'], color='orange', alpha=0.3)
-        plt.title("Curva de pérdida (clasificación)")
-        plt.xlabel("Épocas")
-        plt.ylabel("Pérdida")
+        plt.title("Loss Curve (Classification)")
+        plt.xlabel("Epochs")
+        plt.ylabel("Loss")
         plt.legend(["Train Loss", "Val Loss"])
 
         plt.subplot(1, 2, 2)
         for h in histories:
             plt.plot(h.history['accuracy'], color='blue', alpha=0.3)
             plt.plot(h.history['val_accuracy'], color='orange', alpha=0.3)
-        plt.title("Curva de exactitud (clasificación)")
-        plt.xlabel("Épocas")
-        plt.ylabel("Exactitud")
+        plt.title("Accuracy Curve (Classification)")
+        plt.xlabel("Epochs")
+        plt.ylabel("Accuracy")
         plt.legend(["Train Acc", "Val Acc"])
 
         plt.tight_layout()
         plt.show()
 
     else:
-        # MSE de entrenamiento y validación
+        # Plot MSE for regression
         plt.figure(figsize=(14, 5))
 
         plt.subplot(1, 2, 1)
         for h in histories:
             plt.plot(h.history['mse'], color='blue', alpha=0.3)
             plt.plot(h.history['val_mse'], color='orange', alpha=0.3)
-        plt.title("Curva de error cuadrático medio (regresión)")
-        plt.xlabel("Épocas")
+        plt.title("Mean Squared Error (Regression)")
+        plt.xlabel("Epochs")
         plt.ylabel("MSE")
         plt.legend(["Train MSE", "Val MSE"])
         plt.tight_layout()
@@ -209,25 +232,23 @@ def evaluate_model(X, y, task):
 if __name__ == "__main__":
   set_seed(RANDOM_STATE)
 
+  # Load datasets (classification and regression)
   df_class = pd.read_csv("https://raw.githubusercontent.com/theochem/B3DB/refs/heads/main/B3DB/B3DB_classification.tsv", sep="\t")
   df_regr = pd.read_csv("https://raw.githubusercontent.com/theochem/B3DB/refs/heads/main/B3DB/B3DB_regression.tsv", sep="\t")
 
-  print("\n=== CLASIFICACIÓN ===")
-  # ANTES: Xc, yc = prepare_dataset(df_class, "classification")
-  # AHORA: Esperamos 3 valores, pero el tercero lo ignoramos con _
+  print("\n=== CLASSIFICATION ===")
   Xc, yc, _ = prepare_dataset(df_class, "classification")
   res_c = evaluate_model(Xc, yc, "classification")
-  print("Media clasificación:\n", res_c.mean())
-  print("Desviación:\n", res_c.std())
+  print("Classification Mean:\n", res_c.mean())
+  print("Standard Deviation:\n", res_c.std())
 
-  print("\n=== REGRESIÓN ===")
-  # ANTES: Xr, yr = prepare_dataset(df_regr, "regression")
-  # AHORA: Esperamos 3 valores, pero el tercero lo ignoramos con _
+  print("\n=== REGRESSION ===")
   Xr, yr, _ = prepare_dataset(df_regr, "regression")
   res_r = evaluate_model(Xr, yr, "regression")
-  print("Media regresión:\n", res_r.mean())
-  print("Desviación:\n", res_r.std())
+  print("Regression Mean:\n", res_r.mean())
+  print("Standard Deviation:\n", res_r.std())
 
+  # Train final models and save them
   Xc_final, yc_final, scaler_classification_features = prepare_dataset(df_class, "classification")
   model_classification_final = build_model(Xc_final.shape[1], "classification")
   model_classification_final.fit(Xc_final, yc_final, epochs=100, batch_size=32, verbose=0,
@@ -236,7 +257,7 @@ if __name__ == "__main__":
 
   Xr_fps = np.array([smiles_to_fingerprint(s) for s in df_regr["SMILES"].dropna().apply(standardize_smiles)])
   Xr_desc_raw = np.array([extract_physchem_features(s) for s in df_regr["SMILES"].dropna().apply(standardize_smiles)])
-  Xr_desc_scaled = scaler_classification_features.transform(Xr_desc_raw) # Usamos el scaler de clasificación
+  Xr_desc_scaled = scaler_classification_features.transform(Xr_desc_raw)
   Xr_final = np.concatenate([Xr_fps, Xr_desc_scaled], axis=1)
   yr_final = df_regr["logBB"].dropna().to_numpy()
 
@@ -245,7 +266,7 @@ if __name__ == "__main__":
                              callbacks=[EarlyStopping(monitor="loss", patience=10, restore_best_weights=True)])
   model_regression_final.save('regression_model.keras')
 
+  # Save the scaler for later use
   joblib.dump(scaler_classification_features, 'scaler_physchem.pkl')
 
-  print("Modelos y scaler guardados exitosamente.")
-
+  print("Models and scaler saved successfully.")
