@@ -189,43 +189,43 @@ def evaluate_model(X, y, task):
 
         if task == 'classification':
         # Plot training and validation loss and accuracy
-        plt.figure(figsize=(14, 5))
+            plt.figure(figsize=(14, 5))
 
-        plt.subplot(1, 2, 1)
-        for h in histories:
-            plt.plot(h.history['loss'], color='blue', alpha=0.3)
-            plt.plot(h.history['val_loss'], color='orange', alpha=0.3)
-        plt.title("Loss Curve (Classification)")
-        plt.xlabel("Epochs")
-        plt.ylabel("Loss")
-        plt.legend(["Train Loss", "Val Loss"])
+            plt.subplot(1, 2, 1)
+            for h in histories:
+                plt.plot(h.history['loss'], color='blue', alpha=0.3)
+                plt.plot(h.history['val_loss'], color='orange', alpha=0.3)
+            plt.title("Loss Curve (Classification)")
+            plt.xlabel("Epochs")
+            plt.ylabel("Loss")
+            plt.legend(["Train Loss", "Val Loss"])
 
-        plt.subplot(1, 2, 2)
-        for h in histories:
-            plt.plot(h.history['accuracy'], color='blue', alpha=0.3)
-            plt.plot(h.history['val_accuracy'], color='orange', alpha=0.3)
-        plt.title("Accuracy Curve (Classification)")
-        plt.xlabel("Epochs")
-        plt.ylabel("Accuracy")
-        plt.legend(["Train Acc", "Val Acc"])
+            plt.subplot(1, 2, 2)
+            for h in histories:
+                plt.plot(h.history['accuracy'], color='blue', alpha=0.3)
+                plt.plot(h.history['val_accuracy'], color='orange', alpha=0.3)
+            plt.title("Accuracy Curve (Classification)")
+            plt.xlabel("Epochs")
+            plt.ylabel("Accuracy")
+            plt.legend(["Train Acc", "Val Acc"])
 
-        plt.tight_layout()
-        plt.show()
+            plt.tight_layout()
+            plt.show()
 
-    else:
-        # Plot MSE for regression
-        plt.figure(figsize=(14, 5))
+        else:
+            # Plot MSE for regression
+            plt.figure(figsize=(14, 5))
 
-        plt.subplot(1, 2, 1)
-        for h in histories:
-            plt.plot(h.history['mse'], color='blue', alpha=0.3)
-            plt.plot(h.history['val_mse'], color='orange', alpha=0.3)
-        plt.title("Mean Squared Error (Regression)")
-        plt.xlabel("Epochs")
-        plt.ylabel("MSE")
-        plt.legend(["Train MSE", "Val MSE"])
-        plt.tight_layout()
-        plt.show()
+            plt.subplot(1, 2, 1)
+            for h in histories:
+                plt.plot(h.history['mse'], color='blue', alpha=0.3)
+                plt.plot(h.history['val_mse'], color='orange', alpha=0.3)
+            plt.title("Mean Squared Error (Regression)")
+            plt.xlabel("Epochs")
+            plt.ylabel("MSE")
+            plt.legend(["Train MSE", "Val MSE"])
+            plt.tight_layout()
+            plt.show()
 
     return pd.DataFrame(metrics)
 

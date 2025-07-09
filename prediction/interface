@@ -1,0 +1,181 @@
+# === IMPORTS ===
+# Core libraries for data manipulation and machine learning
+import pandas as pd
+import numpy as np
+
+# RDKit for molecule handling and descriptor calculation
+from rdkit import Chem, DataStructs
+from rdkit.Chem import Descriptors, Crippen, Lipinski, rdMolDescriptors
+from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
+
+# Scikit-learn for preprocessing
+from sklearn.preprocessing import StandardScaler
+
+# Keras for loading pre-trained models
+from tensorflow.keras.models import load_model
+
+# Widgets and display for interactive UI in notebooks
+import ipywidgets as widgets
+from IPython.display import display, HTML
+
+# For loading pre-fitted scaler object
+import joblib
+
+# === CONFIG ===
+FP_SIZE = 2048
+RADIUS = 2
+morgan_generator = GetMorganGenerator(radius=RADIUS, fpSize=FP_SIZE)
+
+# === LOAD MODELS AND SCALER ===
+# Attempt to load classification model, regression model, and scaler
+model_classification = None
+model_regression = None
+scaler_physchem = None
+
+try:
+    model_classification = load_model('classification_model.keras')
+    model_regression = load_model('regression_model.keras')
+    scaler_physchem = joblib.load('scaler_physchem.pkl')
+    print("Models and scaler loaded successfully.")
+except Exception as e:
+    print(f"Error loading models or scaler: {e}")
+    print("Ensure all required files are in the same directory: 'classification_model.keras', 'regression_model.keras', and 'scaler_physchem.pkl'.")
+
+# === SMILES Standardization ===
+def standardize_smiles(smiles):
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return None
+        return Chem.MolToSmiles(mol, canonical=True)
+    except:
+        return None
+
+# === Convert SMILES to Morgan Fingerprint ===
+def smiles_to_fingerprint(smiles):
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return np.zeros(FP_SIZE, dtype=np.float32)
+    fp = morgan_generator.GetFingerprint(mol)
+    arr = np.zeros((FP_SIZE,), dtype=np.float32)
+    DataStructs.ConvertToNumpyArray(fp, arr)
+    return arr
+
+# === Extract 9 physicochemical descriptors ===
+def extract_physchem_features(smiles):
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return np.zeros(9, dtype=np.float32)
+    return np.array([
+        Descriptors.MolWt(mol),
+        Descriptors.MolMR(mol),
+        Descriptors.TPSA(mol),
+        Crippen.MolLogP(mol),
+        Lipinski.NumRotatableBonds(mol),
+        Lipinski.NumHDonors(mol),
+        Lipinski.NumHAcceptors(mol),
+        rdMolDescriptors.CalcNumAromaticRings(mol),
+        0.0  # Placeholder for future feature
+    ], dtype=np.float32)
+
+# === Prepare input vector using the fitted scaler ===
+def prepare_input(smiles):
+    smiles = standardize_smiles(smiles)
+    if smiles is None:
+        return None
+    fp = smiles_to_fingerprint(smiles)
+    desc = extract_physchem_features(smiles)
+
+    if scaler_physchem is None:
+        print("Error: Scaler not loaded. Descriptors cannot be properly scaled.")
+        return None
+    else:
+        desc_scaled = scaler_physchem.transform(desc.reshape(1, -1))
+
+    return np.concatenate([fp.reshape(1, -1), desc_scaled], axis=1)
+
+# === PREDICT MULTIPLE SMILES WITH ADJUSTED DECISION RULES ===
+def predict_multiple(smiles_list, threshold_prob_low=0.4, threshold_logbb_low=-0.4):
+    results = []
+
+    # Check if models and scaler are loaded
+    if model_classification is None or model_regression is None or scaler_physchem is None:
+        results.append({"SMILES": "N/A", "Status": "Models/Scaler not loaded", "Prob. BBB+": "-", "logBB": "-", "Crosses BBB": "No"})
+        df = pd.DataFrame(results)
+        display(HTML(df.to_html()))
+        return
+
+    for s in smiles_list:
+        std_smiles = standardize_smiles(s)
+        if std_smiles is None:
+            results.append({"SMILES": s, "Status": "Invalid SMILES", "Prob. BBB+": "-", "logBB": "-", "Crosses BBB": "No"})
+            continue
+
+        x = prepare_input(std_smiles)
+        if x is None:
+            results.append({"SMILES": std_smiles, "Status": "Preprocessing Error", "Prob. BBB+": "-", "logBB": "-", "Crosses BBB": "No"})
+            continue
+
+        # Predict using loaded models
+        prob = model_classification.predict(x, verbose=0)[0][0]
+        logbb = model_regression.predict(x, verbose=0)[0][0]
+
+        # === DECISION LOGIC ===
+decision = "No"
+if prob >= 0.85 and logbb > -0.3:
+    decision = "Yes"
+elif prob >= 0.55 and logbb > 0.0:
+    decision = "Yes"
+elif prob > threshold_prob_low and logbb > threshold_logbb_low:
+    decision = "Yes"
+if prob < 0.2:
+    decision = "No"
+
+results.append({
+    "SMILES": std_smiles,
+    "Status": "OK",
+    "Prob. BBB+": round(prob, 4),
+    "logBB": round(logbb, 4),
+    "Crosses BBB": decision
+})
+
+df = pd.DataFrame(results)
+
+# === Color formatting function for BBB prediction ===
+def color_bhe(val):
+    if val == "Yes":
+        return 'background-color: #c6f7c3'  # light green
+    elif val == "No":
+        return 'background-color: #f7c3c3'  # light red
+    else:
+        return ''
+
+# === Styled table display ===
+styled = df.style.set_properties({'text-align': 'center'}) \
+                 .set_table_attributes("style='width:80%; margin:auto'") \
+                 .applymap(color_bhe, subset=["Crosses BBB"]) \
+                 .set_caption("BBB Permeability Predictions")
+
+display(HTML(styled.to_html()))
+
+# === Interactive input (textarea) and button ===
+text_input = widgets.Textarea(
+    value="""<Paste SMILES here>""",
+    placeholder='Enter one or more SMILES strings separated by line breaks...',
+    description='SMILES:',
+    layout=widgets.Layout(width='100%', height='250px'),
+    style={'description_width': 'initial'}
+)
+
+button = widgets.Button(description="Predict", button_style='success')
+output = widgets.Output()
+
+def on_button_clicked(b):
+    with output:
+        output.clear_output()
+        smiles_list = text_input.value.strip().split("\n")
+        predict_multiple(smiles_list)
+
+button.on_click(on_button_clicked)
+
+display(text_input, button, output)
