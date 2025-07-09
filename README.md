@@ -1,6 +1,6 @@
-# FinalDegreeProject
+# BBB permeability prediction with Deep Learning
 
-In this project, I trained a deep neural network model to predict permeability across the blood-brain barrier (BBB), a key challenge in central nervous system drug development.
+In my FinalDegreeProject, I trained a deep neural network model to predict permeability across the blood-brain barrier (BBB), a key challenge in central nervous system drug development.
 
 The model was trained using the **B3DB dataset**, a curated and diverse molecular database specifically designed for BBB permeability studies. This dataset was published by Meng et al. (2021):
 
